@@ -1,0 +1,155 @@
+from collections import defaultdict
+import networkx as nx
+import matplotlib.pyplot as plt
+
+class KargoAkisSistemi:
+    def __init__(self, sehir_sayisi):
+        # Şehir sayısı ve gerekli veri yapıları
+        self.sehir_sayisi = sehir_sayisi
+        self.akim_agi = defaultdict(lambda: defaultdict(int))  # Akış ağı (flow network)
+        self.stoklar = defaultdict(int)  # Şehirlerin stok bilgisi
+        self.G = nx.DiGraph()  # NetworkX grafiği (yönlü graf)
+
+    def stok_ekle(self, sehir, miktar):
+        # Şehirlere stok ekler
+        self.stoklar[sehir] = miktar
+
+    def siparis_ekle(self, kaynak, hedef, miktar):
+        # Kaynak şehirden hedef şehire sipariş ekler
+        if self.stok_yeterli_mi(kaynak, miktar):
+            # Eğer kaynak şehirde yeterli stok varsa, siparişi ekle
+            self.akim_agi[kaynak][hedef] = miktar
+            self.G.add_edge(f"Şehir {kaynak}", f"Şehir {hedef}", weight=miktar)
+            return True
+        else:
+            # Yeterli stok yoksa alternatif şehir arar
+            alternatif_kaynak = self.alternatif_sehir_bul(miktar)
+            if alternatif_kaynak is not None:
+                # Alternatif şehirden siparişi karşıla
+                self.akim_agi[alternatif_kaynak][hedef] = miktar
+                self.G.add_edge(f"Şehir {alternatif_kaynak}", f"Şehir {hedef}", weight=miktar)
+                print(f"Stok yetersiz: Sipariş Şehir {alternatif_kaynak}'dan karşılanacak")
+                return True
+            print(f"HATA: Şehir {kaynak}'da yeterli stok yok ve alternatif şehir bulunamadı")
+            return False
+
+    def stok_yeterli_mi(self, sehir, miktar):
+        # Şehirde yeterli stok olup olmadığını kontrol eder
+        return self.stoklar[sehir] >= miktar
+
+    def alternatif_sehir_bul(self, gereken_miktar):
+        # Yeterli stoğa sahip bir alternatif şehir bulur
+        for sehir, stok in self.stoklar.items():
+            if stok >= gereken_miktar:
+                return sehir
+        return None
+
+    def bfs(self, kaynak, hedef, yol):
+        # Genişlik öncelikli arama (BFS) algoritması, yolun bulunup bulunmadığını kontrol eder
+        ziyaret = [False] * self.sehir_sayisi
+        kuyruk = []
+        kuyruk.append(kaynak)
+        ziyaret[kaynak] = True
+
+        while kuyruk:
+            u = kuyruk.pop(0)
+            for v in range(self.sehir_sayisi):
+                if not ziyaret[v] and self.akim_agi[u][v] > 0:
+                    kuyruk.append(v)
+                    ziyaret[v] = True
+                    yol[v] = u
+        
+        return ziyaret[hedef]
+
+    def ford_fulkerson(self, kaynak, hedef):
+        # Ford-Fulkerson algoritması, maksimum akışı hesaplar
+        yol = [-1] * self.sehir_sayisi
+        max_akim = 0
+
+        while self.bfs(kaynak, hedef, yol):
+            # BFS ile geçerli bir yol bulduğunda akışı hesaplarsın
+            yol_akimi = float("inf")
+            v = hedef
+
+            while v != kaynak:
+                u = yol[v]
+                yol_akimi = min(yol_akimi, self.akim_agi[u][v])
+                v = yol[v]
+
+            v = hedef
+            while v != kaynak:
+                u = yol[v]
+                if not self.stok_yeterli_mi(u, yol_akimi):
+                    print(f"HATA: Şehir {u}'da yeterli stok kalmadı")
+                    return max_akim
+                # Akışı güncelle
+                self.stoklar[u] -= yol_akimi
+                self.akim_agi[u][v] -= yol_akimi
+                self.akim_agi[v][u] += yol_akimi
+                v = yol[v]
+
+            max_akim += yol_akimi
+
+        return max_akim
+
+    def dagitim_plani_olustur(self):
+        # Dağıtım planını oluşturur (şehirlere taşınacak ürün miktarını belirtir)
+        plan = []
+        for u in range(self.sehir_sayisi):
+            for v in range(self.sehir_sayisi):
+                if self.akim_agi[v][u] > 0:
+                    plan.append(f"Şehir {u}'dan Şehir {v}'ye {self.akim_agi[v][u]} birim ürün taşı")
+        return plan
+    
+    def grafi_ciz(self):
+        # Eğer akış ağında hiç bir akış yoksa grafik çizilmesin
+        if sum(sum(akim.values()) for akim in self.akim_agi.values()) == 0:
+            print("Akış Oluşturulamıyor")
+            return
+        
+        # NetworkX kullanarak şehirler arası kargo akış ağını çizer
+        plt.figure(figsize=(12, 8))
+        pos = nx.spring_layout(self.G)
+        nx.draw_networkx_nodes(self.G, pos, node_color='lightblue', node_size=2000, alpha=0.7)
+        edges = self.G.edges(data=True)
+        nx.draw_networkx_edges(self.G, pos, edge_color='gray', width=2, arrowsize=20)
+        nx.draw_networkx_labels(self.G, pos, font_size=10)
+        edge_labels = nx.get_edge_attributes(self.G, 'weight')
+        nx.draw_networkx_edge_labels(self.G, pos, edge_labels)
+        plt.title("Şehirler Arası Kargo Akış Ağı")
+        plt.axis('off')
+        plt.show()
+
+# Kullanım örneği:
+def ornek_kullanim():
+    # Sistem başlatma (4 şehirli bir sistem)
+    sistem = KargoAkisSistemi(4)
+    
+    # Şehirlere stok ekle
+    sistem.stok_ekle(0, 20)
+    sistem.stok_ekle(1, 15)
+    sistem.stok_ekle(2, 25)
+    sistem.stok_ekle(3, 0)
+    
+    # Örnek siparişler
+    sistem.siparis_ekle(0, 1, 10)
+    sistem.siparis_ekle(0, 2, 15)
+    sistem.siparis_ekle(1, 3, 8)
+    sistem.siparis_ekle(2, 3, 12)
+    
+    print("\nMevcut stoklar:")
+    for sehir, stok in sistem.stoklar.items():
+        print(f"Şehir {sehir}: {stok} birim")
+    
+    max_akim = sistem.ford_fulkerson(0, 3)
+    print(f"\nMaksimum günlük taşıma kapasitesi: {max_akim} birim")
+    
+    print("\nDağıtım planı:")
+    plan = sistem.dagitim_plani_olustur()
+    for adim in plan:
+        print(adim)
+    
+    # Akış ağını çiz
+    sistem.grafi_ciz()
+
+ornek_kullanim()
